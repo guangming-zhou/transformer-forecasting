@@ -1,0 +1,92 @@
+# ============================================================
+# 全局配置：数据管道 + 模型 + 训练 + 输出
+# 用法：
+#   from utils.dataset import load_data_config
+#   from models.transformer import build_model
+#   python train/train.py --config configs/base.yaml --seed 42
+# 任意字段都可用 CLI 点路径覆盖：
+#   --override train.lr=5e-4 model.d_model=32 data.seq_len=48
+# ============================================================
+
+# ---------------- 数据管道 ----------------
+data:
+  data_path: data/ETTh1.csv
+
+  # 列名与目标列：想把项目套到自己的 CSV 上，改这两行 + data_path 即可。
+  # 输入维度与目标列下标都由这里推导（模型、scaler、评估、Demo 全部跟着走）。
+  feature_cols: [HUFL, HULL, MUFL, MULL, LUFL, LULL, OT]
+  target_col: OT
+
+  seq_len: 24                   # 输入窗口长度（小时）
+  pred_len: 24                  # 预测长度（小时）
+
+  train_ratio: 0.6
+  val_ratio: 0.2
+  test_ratio: 0.2
+
+  # 切分模式
+  #   time_sequential   严格按时间 6:2:2（主切分，默认）
+  #   season_stratified 对照实验：只在原 train 时间段内按季节分层，
+  #                     每季前 season_train_ratio 归 train、其余归 val；
+  #                     test 仍用原 test 段，原 val 段不参与。
+  #                     两种模式下 scaler 都用原 train 段拟合，不重拟合。
+  split_mode: time_sequential
+  season_train_ratio: 0.75
+
+  # 滑窗降采样：只作用于 train（每 window_stride 个窗口取 1 个），val/test 保持完整。
+  # 动机：相邻窗口共享 48 小时中的 47 小时，独立样本量其实只有 rows/48 左右。
+  window_stride: 1
+
+  # 清洗 1：连续完全相同的行 -> 整段（含首行）视为缺失。
+  # 用 "mask" 而不是删行：ETTh1 是连续小时序列，删行会让滑窗跨越时间洞、x 与 y 错位。
+  dedup_policy: mask
+
+  # 清洗 2：行级零值。一行中 >= zero_min_cols 列为 0 时，该行内所有恰为 0 的单元格视为缺失。
+  # 按行判定是为了不误杀单列合法的 0 值（HUFL 89 个、HULL 410 个…）。
+  zero_min_cols: 5
+
+  # 清洗 3：单列连续 0 的失效段，分级阈值（统一生效，不做默认关闭的开关，
+  # 保证多 seed / 消融实验的清洗策略一致、可复现）。
+  #   6 个输入列：连续为 0 >= 12 小时 -> 视为缺失并插值
+  #   目标列 OT ：连续为 0 >= 6  小时 -> 视为缺失并插值
+  zero_run_clean: true
+  zero_run_input_hours: 12
+  zero_run_target_hours: 6
+
+  # 归一化与 3σ 裁剪（统计量只用 train 段拟合，避免泄漏）
+  clip_sigma: 3.0
+
+# ---------------- 模型（消融用） ----------------
+model:
+  name: transformer
+  input_len: 24                 # 必须与 data.seq_len 一致
+  pred_len: 24                  # 必须与 data.pred_len 一致
+  d_model: 64
+  nhead: 4
+  num_layers: 2
+  dim_ff: 128
+  dropout: 0.1
+  use_pe: true
+  # 残差预测开关：true 时 输出 = 输入最后一步 OT + Δ，模型只学「相对最后一步的变化量」。
+  # persistence 等价于 Δ≡0，因此打开后平凡基线就成了模型的起点。默认 false（行为不变）。
+  residual: false
+
+# ---------------- 训练 ----------------
+train:
+  batch_size: 64
+  lr: 1.0e-3
+  weight_decay: 1.0e-4
+  epochs: 30
+  grad_clip: 1.0                # <=0 表示关闭梯度裁剪
+  scheduler: cosine             # cosine / none（warmup_epochs>0 时为 warmup+cosine）
+  warmup_epochs: 0              # 0 = 关闭（默认，保持历史主结果不变）；预算审计实验用 5
+  min_lr_ratio: 0.0             # cosine 末端 lr 下限比例（仅 warmup_epochs>0 时生效）
+  patience: 8                   # early stopping：连续 N 个 epoch 无改善即停
+  seed: 42
+  device: auto                  # auto / cpu / cuda
+
+# ---------------- 输出 ----------------
+output:
+  scaler_path: outputs/scaler.npz   # 归一化参数（由数据管道写出，供反归一化复用）
+  ckpt_dir: outputs/ckpt
+  log_dir: outputs/logs

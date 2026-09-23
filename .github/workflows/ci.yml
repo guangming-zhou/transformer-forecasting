@@ -1,0 +1,126 @@
+name: CI
+
+# 每次 push / PR 都验证：数据管道、模型、切分不变量、Demo 契约，
+# 以及**仓库内附带的 ckpt 能否复现 README 里写的那组指标**。
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    name: smoke tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # badge 声称 3.10+，这里就把 3.10 和当前开发版本都真跑一遍
+        python-version: ["3.10", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # CI 无 GPU：先装 CPU 版 torch，避免拉 CUDA 轮子（约省 700 MB）
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -r requirements.txt
+
+      - name: Data pipeline + cleaning self-check
+        run: python -m utils.smoke_test
+
+      - name: Model forward / parameter count
+        run: python -m models.smoke_test
+
+      - name: Split modes + window_stride invariants
+        run: python -m utils.smoke_split_modes
+
+      - name: Official ETTh1 raw protocol invariants
+        run: |
+          python - <<'PY'
+          from utils.dataset import load_data_config, prepare_data
+          cfg = load_data_config("configs/official_etth1_96.yaml")
+          bundle = prepare_data(cfg, save=False, verbose=False)
+          counts = tuple(len(bundle["datasets"][k]) for k in ("train", "val", "test"))
+          assert counts == (8449, 2785, 2785), counts
+          assert bundle["clean_info"]["cells_masked"] == 0
+          assert bundle["stats"]["train"]["cells_clipped"] == 0
+          assert bundle["stats"]["val"]["cells_clipped"] == 0
+          assert bundle["stats"]["test"]["cells_clipped"] == 0
+          print("official_etth1 raw protocol:", counts, "no masking/clipping")
+          PY
+
+      - name: Demo API contract (TestClient, no server needed)
+        run: python -m demo.test_api
+
+      - name: Unit tests (pytest)
+        run: python -m pytest -q
+
+      - name: Evaluate the bundled checkpoint
+        run: |
+          python eval/evaluate.py \
+            --ckpt outputs/ckpt/seed42.pt \
+            --config configs/base.yaml \
+            --out outputs/figs
+
+      - name: Assert the bundled ckpt reproduces the documented metrics
+        run: |
+          python - <<'PY'
+          import json
+          import numpy as np
+
+          z = np.load("outputs/figs/preds.npz", allow_pickle=False)
+          m = json.loads(str(z["meta"]))["metrics"]
+
+          # README「Main Results」里 Transformer 那一行的 seed=42 数值
+          expected = {"overall": (1.8737, 2.4848), "h1": (0.9200, 1.1757),
+                      "h6": (1.4234, 1.8835), "h12": (1.6651, 2.2287),
+                      "h24": (2.6118, 3.3025)}
+          for k, (mae, rmse) in expected.items():
+              got = m[k]
+              assert abs(got["MAE"] - mae) < 2e-3, (k, got, mae)
+              assert abs(got["RMSE"] - rmse) < 2e-3, (k, got, rmse)
+              print(f"  {k:<8} MAE={got['MAE']:.4f}  RMSE={got['RMSE']:.4f}  ✓")
+          print("bundled ckpt 复现了 README 记录的 test 指标")
+          PY
+
+      - name: Evaluate the bundled residual checkpoint
+        run: |
+          python eval/evaluate.py \
+            --ckpt outputs/ckpt_res/seed42.pt \
+            --config configs/base.yaml \
+            --out outputs/figs_res
+
+      - name: Assert the residual ckpt reproduces its seed=42 metrics
+        run: |
+          python - <<'PY'
+          import json
+          import numpy as np
+
+          z = np.load("outputs/figs_res/preds.npz", allow_pickle=False)
+          meta = json.loads(str(z["meta"]))
+          m = meta["metrics"]
+
+          # 断言的是 README「Residual-Prediction Fix」表里 **seed=42 单跑那一行**，
+          # 不是 5-seed 均值（1.4951 ± 0.0621 无法由单个 ckpt 复现）
+          assert meta["seed"] == 42, meta["seed"]
+          assert meta["model_config"]["residual"] is True, meta["model_config"]
+
+          expected = {"overall": (1.409630, 1.951802), "h1": (0.489565, 0.691178),
+                      "h6": (1.175168, 1.590095), "h12": (1.549022, 2.058930),
+                      "h24": (1.773140, 2.383104)}
+          for k, (mae, rmse) in expected.items():
+              got = m[k]
+              assert abs(got["MAE"] - mae) < 2e-3, (k, got, mae)
+              assert abs(got["RMSE"] - rmse) < 2e-3, (k, got, rmse)
+              print(f"  {k:<8} MAE={got['MAE']:.4f}  RMSE={got['RMSE']:.4f}  ✓")
+          print("bundled residual ckpt 复现了 README 记录的 seed=42 指标")
+          PY

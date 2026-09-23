@@ -1,0 +1,55 @@
+# Official ETTh1 long-term forecasting protocol (96 -> 96).
+# Raw values are preserved: no anomaly replacement and no sigma clipping.
+
+data:
+  data_path: data/ETTh1.csv
+  feature_cols: [HUFL, HULL, MUFL, MULL, LUFL, LULL, OT]
+  target_col: OT
+  seq_len: 96
+  pred_len: 96
+
+  # Fixed benchmark boundaries: 12 months train / 4 months val / 4 months test.
+  split_mode: official_etth1
+  train_ratio: 0.6             # ignored by official_etth1; retained for schema compatibility
+  val_ratio: 0.2
+  test_ratio: 0.2
+  season_train_ratio: 0.75
+  window_stride: 1
+
+  # Primary benchmark uses the upstream raw values exactly as distributed.
+  dedup_policy: keep
+  zero_min_cols: 8             # more than the 7 features: disables row-zero masking
+  zero_run_clean: false
+  zero_run_input_hours: 12
+  zero_run_target_hours: 6
+  clip_sigma: 0.0
+
+model:
+  name: transformer
+  input_len: 96
+  pred_len: 96
+  d_model: 64
+  nhead: 4
+  num_layers: 2
+  dim_ff: 128
+  dropout: 0.1
+  use_pe: true
+  residual: false
+
+train:
+  batch_size: 64
+  lr: 1.0e-3
+  weight_decay: 1.0e-4
+  epochs: 30
+  grad_clip: 1.0
+  scheduler: cosine
+  warmup_epochs: 0
+  min_lr_ratio: 0.0
+  patience: 8
+  seed: 42
+  device: auto
+
+output:
+  scaler_path: outputs/scaler_official96.npz
+  ckpt_dir: outputs/ckpt_official96
+  log_dir: outputs/logs_official96

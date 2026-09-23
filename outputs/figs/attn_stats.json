@@ -1,0 +1,31 @@
+{
+  "ckpt": "outputs/ckpt/seed42.pt",
+  "seed": 42,
+  "samples": [
+    0,
+    1718,
+    3436
+  ],
+  "seq_len": 24,
+  "nhead": 4,
+  "layers": 2,
+  "forward_with_attn_max_abs_diff": 0.0,
+  "per_layer": [
+    {
+      "layer": 0,
+      "entropy": 3.1726386547088623,
+      "recent4_share": 0.1656266301870346,
+      "oldest4_share": 0.16526387631893158,
+      "diagonal_share": 0.047804564237594604
+    },
+    {
+      "layer": 1,
+      "entropy": 3.1699142456054688,
+      "recent4_share": 0.18197320401668549,
+      "oldest4_share": 0.17012496292591095,
+      "diagonal_share": 0.04634154960513115
+    }
+  ],
+  "uniform_entropy": 3.1780538303479458,
+  "uniform_recent4_share": 0.16666666666666666
+}

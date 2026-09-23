@@ -1,0 +1,60 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+
+# ---- 数据：data/ETTh1.csv **随仓库分发**（约 2.5 MB），因此不忽略 ----
+
+# ---- 训练产物（体积大 / 可复现，不入库）----
+outputs/ckpt*/*
+outputs/logs*/
+outputs/_runs/
+outputs/scaler.npz
+*.pt
+*.npz
+
+# ---- 例外：随仓库分发的小体积必需品，使评估 / Demo 开箱即用 ----
+# 两条注意：
+#   1) 必须写在 *.pt / *.npz / outputs/ckpt*/* **之后**（gitignore 后匹配者生效）
+#   2) 上面必须用 `outputs/ckpt*/*`（排除目录**内容**）而不是 `outputs/ckpt*/`
+#      —— 一旦排除了目录本身，git 就无法再用 ! 把里面的文件加回来
+!outputs/ckpt/seed42.pt
+# scaler 是 evaluate / baseline / demo 的必需输入（demo 在 import 时就读），仅 5.4 KB
+!outputs/scaler.npz
+# 残差实验的 seed=42 ckpt（423 KB）—— README「Residual-Prediction Fix」里
+# seed=42 那一行的结果可被 CI 复现（5-seed 统计量仍不可由单 ckpt 复现）
+!outputs/ckpt_res/seed42.pt
+
+# ---- 虚拟环境 / IDE ----
+.venv/
+env/
+.idea/
+.vscode/
+_piptmp/
+pytest-cache-files-*/
+.pytest_cache/
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Local training diagnostics may contain absolute paths. Publish metrics JSON instead.
+outputs/**/*.log
+outputs/**/logs/
+# Locally exported/preprocessed datasets are not redistributed.
+data/*
+!data/ETTh1.csv
+!data/README.md
+
+# ---- 图片：docs/figs/ 是 README 引用的正式副本，outputs/figs*/*.png 是运行产物 ----
+# eval/evaluate.py、eval/make_figs.py、eval/visualize_attn.py 都会把图写到 outputs/figs/，
+# 每次重跑都会重新生成 —— 所以不重复入库，避免 663 KB 冗余。
+# 用 figs* 而不是 figs：CI 里 `evaluate.py --out outputs/figs_res` 也会产生 PNG。
+outputs/figs*/*.png
+
+# ---- 注意 ----
+# outputs/figs/*.json（指标：attn_stats / metrics_*）仍入库：被 README 引用且体积很小。
+# 其中 *.npz（preds*.npz）已被上面的 *.npz 规则排除，属于预期行为。

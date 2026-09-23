@@ -1,0 +1,83 @@
+# ============================================================
+# 历史自定义设定：time_sequential 6:2:2 下的 96 -> 96。
+# 注意：这不是官方 ETTh1 固定月份切分；正式入口见 official_etth1_96.yaml。
+#
+# 与 configs/base.yaml 的差异**只有窗口长度**：
+#   data.seq_len / model.input_len : 24 -> 96
+#   data.pred_len / model.pred_len : 24 -> 96
+# 训练配方（AdamW lr=1e-3 / wd=1e-4 / cosine / grad_clip=1.0 / batch=64 /
+# epochs=30 / patience=8）与切分（time_sequential 6:2:2）完全保持不变，
+# 这样 96->96 与 24->24 的对比是「同一协议换 horizon」，不是换配方。
+#
+# 用法
+#   python train/train.py --config configs/lstf96.yaml --seed 42
+#   python train/train.py --config configs/lstf96.yaml --seed 42 \
+#       --override output.ckpt_dir=outputs/ckpt_lstf96_res output.log_dir=outputs/logs_lstf96_res \
+#                  model.residual=true
+#   python eval/evaluate.py --ckpt outputs/ckpt_lstf96/seed42.pt \
+#       --config configs/lstf96.yaml --out outputs/figs_lstf96
+#
+# 关于 scaler：mean/std/low/high 只用「原 train 段」（时间顺序前 60%）拟合，
+# 与 seq_len / pred_len **无关**，因此本设定下的统计量与 outputs/scaler.npz
+# 逐元素相同（utils/smoke_test.py 会断言这一点）。这里刻意写到另一个文件，
+# 避免训练时把仓库里那份被 CI / Demo 依赖的 outputs/scaler.npz 覆盖掉。
+# ============================================================
+
+# ---------------- 数据管道 ----------------
+data:
+  data_path: data/ETTh1.csv
+
+  feature_cols: [HUFL, HULL, MUFL, MULL, LUFL, LULL, OT]
+  target_col: OT
+
+  seq_len: 96                   # 输入窗口长度（小时）
+  pred_len: 96                  # 预测长度（小时）
+
+  train_ratio: 0.6
+  val_ratio: 0.2
+  test_ratio: 0.2
+
+  split_mode: time_sequential
+  season_train_ratio: 0.75
+  window_stride: 1
+
+  dedup_policy: mask
+  zero_min_cols: 5
+  zero_run_clean: true
+  zero_run_input_hours: 12
+  zero_run_target_hours: 6
+
+  clip_sigma: 3.0
+
+# ---------------- 模型 ----------------
+model:
+  name: transformer
+  input_len: 96                 # 必须与 data.seq_len 一致
+  pred_len: 96                  # 必须与 data.pred_len 一致
+  d_model: 64
+  nhead: 4
+  num_layers: 2
+  dim_ff: 128
+  dropout: 0.1
+  use_pe: true
+  residual: false
+
+# ---------------- 训练（与 base.yaml 完全一致） ----------------
+train:
+  batch_size: 64
+  lr: 1.0e-3
+  weight_decay: 1.0e-4
+  epochs: 30
+  grad_clip: 1.0
+  scheduler: cosine
+  warmup_epochs: 0
+  min_lr_ratio: 0.0
+  patience: 8
+  seed: 42
+  device: auto
+
+# ---------------- 输出 ----------------
+output:
+  scaler_path: outputs/scaler96.npz   # 与原设定数值相同，另存以保护 outputs/scaler.npz
+  ckpt_dir: outputs/ckpt_lstf96
+  log_dir: outputs/logs_lstf96
